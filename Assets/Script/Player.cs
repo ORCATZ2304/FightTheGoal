@@ -18,12 +18,19 @@ public class Player : MonoBehaviour
     [Header("Visual Container")]
     [SerializeField] private Transform bodyTransform;
 
+    [Header("Audio Settings")]
+    [SerializeField] private AudioClip footstepClip;
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private float footstepInterval = 0.35f; // Time between footsteps
+    private float footstepTimer = 0f;
+
     private Animator animator;
     private Rigidbody2D rb;
 
     private Vector2 movementInput = Vector2.zero;
     private bool isMoving = false;
     private bool isTackling = false;
+    private bool isKnockedBack = false;
     private bool hasBall = false;
     private Ball currentBall = null;
 
@@ -35,6 +42,7 @@ public class Player : MonoBehaviour
     {
         rb = GetComponent<Rigidbody2D>();
         animator = GetComponent<Animator>();
+        if (audioSource == null) audioSource = GetComponent<AudioSource>();
 
         if (bodyTransform == null)
         {
@@ -46,6 +54,11 @@ public class Player : MonoBehaviour
         {
             animator.SetBool(IsMoving, false);
         }
+    }
+
+    private void Update()
+    {
+        HandleFootsteps();
     }
 
     private void FixedUpdate()
@@ -89,10 +102,9 @@ public class Player : MonoBehaviour
     {
         if (value.performed)
         {
-            if(hasBall && currentBall != null)
+            if (hasBall && currentBall != null)
             {
-                // Implement shooting logic here
-                currentBall.ShootBall();    
+                currentBall.ShootBall();
                 PlayerLoseBall();
             }
         }
@@ -101,9 +113,17 @@ public class Player : MonoBehaviour
     // Automatically called when the tackle button is pressed
     public void OnTackle(InputAction.CallbackContext value)
     {
-        if (value.performed && !isTackling)
+        if (value.performed)
         {
-            StartCoroutine(PerformTackle());
+            if (ButtonMashing.Instance != null && ButtonMashing.Instance.IsDuelActive())
+            {
+                // Register a button mash during an active duel
+                ButtonMashing.Instance.RegisterPress(gameObject);
+            }
+            else if (!isTackling && !isKnockedBack)
+            {
+                StartCoroutine(PerformTackle());
+            }
         }
     }
 
@@ -116,7 +136,7 @@ public class Player : MonoBehaviour
         if (dashDirection == Vector2.zero && bodyTransform != null)
         {
             float currentAngle = bodyTransform.eulerAngles.z - angleOffset;
-            float rad = currentAngle * Mathf.Deg2Rad;
+            float rad = currentAngle * Mathf.Deg2Rad; // Fixed multiplication syntax here
             dashDirection = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad));
         }
 
@@ -127,7 +147,7 @@ public class Player : MonoBehaviour
             {
                 rb.linearVelocity = dashDirection.normalized * tackleForce;
             }
-            elapsedTime += Time.deltaTime;
+            elapsedTime += Time.unscaledDeltaTime;
             yield return null;
         }
 
@@ -136,8 +156,28 @@ public class Player : MonoBehaviour
 
     private void MovePlayer()
     {
-        if (rb == null || isTackling) return;
+        if (rb == null || isTackling || isKnockedBack) return;
         rb.linearVelocity = movementInput * moveSpeed;
+    }
+
+    private void HandleFootsteps()
+    {
+        if (isMoving && !isTackling && !isKnockedBack)
+        {
+            footstepTimer += Time.deltaTime;
+            if (footstepTimer >= footstepInterval)
+            {
+                if (audioSource != null && footstepClip != null)
+                {
+                    audioSource.PlayOneShot(footstepClip, 0.5f);
+                }
+                footstepTimer = 0f;
+            }
+        }
+        else
+        {
+            footstepTimer = 0f;
+        }
     }
 
     private void UpdateAnimator()
@@ -168,16 +208,47 @@ public class Player : MonoBehaviour
             Ball ballInScene = FindObjectOfType<Ball>();
             if (ballInScene != null && ballInScene.IsHeldBy(collision.gameObject))
             {
-                ballInScene.ForceRelease();
-
-                // Apply slight knockback to the tackled opponent
-                Rigidbody2D targetRb = collision.gameObject.GetComponent<Rigidbody2D>();
-                if (targetRb != null)
+                // Trigger the mash duel instead of instant release
+                if (ButtonMashing.Instance != null)
                 {
-                    Vector2 knockbackDir = (collision.transform.position - transform.position).normalized;
-                    targetRb.AddForce(knockbackDir * 5f, ForceMode2D.Impulse);
+                    ButtonMashing.Instance.StartDuel(gameObject, collision.gameObject);
                 }
             }
         }
+    }
+
+    public void ApplyKnockback(Vector2 force)
+    {
+        StartCoroutine(KnockbackRoutine(force));
+    }
+
+    private IEnumerator KnockbackRoutine(Vector2 force)
+    {
+        isKnockedBack = true;
+        isTackling = false; // Cancel any active tackle state immediately
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero; // Clear existing velocity for a clean push
+            rb.AddForce(force, ForceMode2D.Impulse);
+        }
+
+        // Stun duration where movement input is ignored
+        yield return new WaitForSecondsRealtime(0.3f);
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero; // Stop drift after knockback ends
+        }
+
+        isKnockedBack = false;
+    }
+
+    // Forcefully unlocks the player so they never stay stuck
+    public void ResetState()
+    {
+        isTackling = false;
+        isKnockedBack = false;
+        StopAllCoroutines(); // Stops any hanging dash or knockback routines
     }
 }
