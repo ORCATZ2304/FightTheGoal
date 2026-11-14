@@ -17,14 +17,15 @@ public class ButtonMashing : MonoBehaviour
     [SerializeField] private RectTransform dialNeedle;
 
     [Header("Camera Shake Settings")]
-    [SerializeField] private float shakeMagnitude = 0.08f; // Keep it subtle so it's a nice minor shake
+    [SerializeField] private float shakeMagnitude = 0.08f;
 
     private bool isDuelActive = false;
-    private GameObject playerWithBall;
-    private GameObject playerTryingToTackle;
+    private GameObject player1;
+    private GameObject player2;
+    private GameObject playerTryingTackle;
 
-    private int ballHolderPresses = 0;
-    private int tacklerPresses = 0;
+    private int player1Presses = 0;
+    private int player2Presses = 0;
 
     private void Awake()
     {
@@ -49,15 +50,28 @@ public class ButtonMashing : MonoBehaviour
         if (isDuelActive) return;
 
         isDuelActive = true;
-        playerTryingToTackle = tackler;
-        playerWithBall = ballHolder;
-        ballHolderPresses = 0;
-        tacklerPresses = 0;
+        playerTryingTackle = tackler; // Save reference properly here
+
+        // Find players using modern Unity 6 methods
+        Player[] allPlayers = Object.FindObjectsByType<Player>(FindObjectsSortMode.None);
+        foreach (Player p in allPlayers)
+        {
+            if (p.gameObject.name.Contains("Player2"))
+            {
+                player2 = p.gameObject;
+            }
+            else
+            {
+                player1 = p.gameObject;
+            }
+        }
+
+        player1Presses = 0;
+        player2Presses = 0;
 
         if (mashPanel != null) mashPanel.SetActive(true);
         if (dimOverlay != null) dimOverlay.SetActive(true);
 
-        // START CONTINUOUS CAMERA SHAKE
         if (CameraShake.Instance != null)
         {
             CameraShake.Instance.StartContinuousShake(shakeMagnitude);
@@ -73,13 +87,13 @@ public class ButtonMashing : MonoBehaviour
     {
         if (!isDuelActive) return;
 
-        if (pressingPlayer == playerWithBall)
+        if (pressingPlayer == player1)
         {
-            ballHolderPresses++;
+            player1Presses++;
         }
-        else if (pressingPlayer == playerTryingToTackle)
+        else if (pressingPlayer == player2)
         {
-            tacklerPresses++;
+            player2Presses++;
         }
     }
 
@@ -87,7 +101,7 @@ public class ButtonMashing : MonoBehaviour
     {
         if (mashSlider == null) return;
 
-        int totalPresses = tacklerPresses + ballHolderPresses;
+        int totalPresses = player1Presses + player2Presses;
 
         if (totalPresses == 0)
         {
@@ -95,7 +109,7 @@ public class ButtonMashing : MonoBehaviour
         }
         else
         {
-            float netDifference = tacklerPresses - ballHolderPresses;
+            float netDifference = player1Presses - player2Presses;
             float normalizedVal = 0.5f + (netDifference / 20f);
             mashSlider.value = Mathf.Clamp01(normalizedVal);
         }
@@ -129,34 +143,32 @@ public class ButtonMashing : MonoBehaviour
         if (mashPanel != null) mashPanel.SetActive(false);
         if (dimOverlay != null) dimOverlay.SetActive(false);
 
-        // STOP CAMERA SHAKE AND RESET CAMERA POSITION
         if (CameraShake.Instance != null)
         {
             CameraShake.Instance.StopShake();
         }
 
-        Ball ball = FindObjectOfType<Ball>();
+        Ball ball = Object.FindFirstObjectByType<Ball>();
 
-        Player tacklerScript = playerTryingToTackle != null ? playerTryingToTackle.GetComponent<Player>() : null;
-        Player holderScript = playerWithBall != null ? playerWithBall.GetComponent<Player>() : null;
+        bool player1Won = player1Presses >= player2Presses;
+        GameObject winner = player1Won ? player1 : player2;
+        GameObject loser = player1Won ? player2 : player1;
 
-        if (tacklerScript != null) tacklerScript.ResetState();
-        if (holderScript != null) holderScript.ResetState();
+        // Fixed variable name from 'tackler' to 'playerTryingTackle'
+        Player tacklerScript = playerTryingTackle != null ? playerTryingTackle.GetComponent<Player>() : null;
 
-        bool tacklerWon = tacklerPresses >= ballHolderPresses;
-
-        if (tacklerWon)
+        Player[] allPlayers = Object.FindObjectsByType<Player>(FindObjectsSortMode.None);
+        foreach (Player p in allPlayers)
         {
-            Debug.Log("Tackler Won the Duel!");
-            if (ball != null) ball.ForceAttachTo(playerTryingToTackle);
-            ApplyKnockback(playerWithBall, playerTryingToTackle);
+            p.ResetState();
         }
-        else
+
+        if (ball != null)
         {
-            Debug.Log("Ball Holder Won the Duel!");
-            if (ball != null) ball.ForceAttachTo(playerWithBall);
-            ApplyKnockback(playerTryingToTackle, playerWithBall);
+            ball.ForceAttachTo(winner);
         }
+
+        ApplyKnockback(loser, winner);
     }
 
     private void ApplyKnockback(GameObject loser, GameObject winner)

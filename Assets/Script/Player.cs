@@ -38,6 +38,9 @@ public class Player : MonoBehaviour
     private static readonly int MoveY = Animator.StringToHash("MoveY");
     private static readonly int IsMoving = Animator.StringToHash("IsMoving");
 
+    [SerializeField] private int playerID = 1; // Unique identifier for this player (1 or 2)
+    public int PlayerID => playerID; // Public getter for external access
+
     private void Start()
     {
         rb = GetComponent<Rigidbody2D>();
